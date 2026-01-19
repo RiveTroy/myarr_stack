@@ -1,0 +1,61 @@
+---
+###############################################################
+#                   Authelia configuration                    #
+###############################################################
+
+server:
+  host: 0.0.0.0
+  port: 9091
+
+log:
+  level: info
+
+theme: dark
+
+jwt_secret: REPLACE_WITH_RANDOM_64_CHAR_STRING # Generate: openssl rand -hex 32
+
+default_redirection_url: https://traefik.arr.local:8080
+
+totp:
+  issuer: arr.local
+  period: 30
+  skew: 1
+
+authentication_backend:
+  file:
+    path: /config/users_database.yml
+    password:
+      algorithm: argon2id
+      iterations: 1
+      salt_length: 16
+      parallelism: 8
+      memory: 64
+
+access_control:
+  default_policy: deny
+  rules:
+    # Allow all authenticated users to all services
+    - domain: "*.arr.local"
+      policy: one_factor
+
+session:
+  name: authelia_session
+  secret: REPLACE_WITH_RANDOM_64_CHAR_STRING # Generate: openssl rand -hex 32
+  expiration: 3600  # 1 hour
+  inactivity: 300   # 5 minutes
+  domain: arr.local
+
+regulation:
+  max_retries: 3
+  find_time: 120
+  ban_time: 300
+
+storage:
+  encryption_key: REPLACE_WITH_RANDOM_64_CHAR_STRING # Generate: openssl rand -hex 32
+  local:
+    path: /config/db.sqlite3
+
+notifier:
+  disable_startup_check: true
+  filesystem:
+    filename: /config/notification.txt

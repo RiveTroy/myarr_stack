@@ -1,0 +1,71 @@
+# ARR Stack - Git Ignore
+
+# Repository notları (local development only)
+.repo_notes.md
+DEVELOPMENT_NOTES.md
+
+# Environment variables (VPN credentials içerir!)
+.env
+
+# Eski dosyalar (hassas bilgiler içerebilir)
+arr_stack_yaml.txt
+
+# Security - Certificates ve Private Keys
+traefik/certs/
+*.key
+*.crt
+*.pem
+
+# Authelia - Sensitive configuration
+authelia/users_database.yml
+authelia/db.sqlite3
+authelia/notification.txt
+
+# Data klasörleri (büyük medya dosyaları)
+data/
+downloads/
+
+# Docker volumes
+gluetun/
+
+# Log dosyaları
+*.log
+monitor.log
+monitor_error.log
+cron.log
+startup.log
+startup_error.log
+
+# Backup dosyaları
+*.tar.gz
+*.zip
+backup/
+*.backup.*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+
+# Temporary files
+tmp/
+temp/
+*.tmp

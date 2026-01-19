@@ -1,0 +1,411 @@
+########################################################################
+#  █████  ██████  ██████      ███████ ████████  █████   ██████ ██   ██ 
+# ██   ██ ██   ██ ██   ██     ██         ██    ██   ██ ██      ██  ██  
+# ███████ ██████  ██████      ███████    ██    ███████ ██      █████   
+# ██   ██ ██   ██ ██   ██          ██    ██    ██   ██ ██      ██  ██  
+# ██   ██ ██   ██ ██   ██     ███████    ██    ██   ██  ██████ ██   ██ 
+########################################################################
+---
+networks:
+  arr_network:
+    driver: bridge
+
+services:
+
+############################
+# TRAEFIK - Reverse Proxy
+############################
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--log.level=DEBUG"
+      - "--ping=true"
+    ports:
+      - "80:80"                # HTTP → HTTPS redirect (network accessible)
+      - "443:443"              # HTTPS (network accessible)
+      - "127.0.0.1:8080:8080"  # Dashboard (localhost only)
+    volumes:
+      - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
+      - ./traefik/certs:/certs:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+    networks:
+      - arr_network
+    security_opt:
+      - no-new-privileges:true
+    restart: always
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.arr.local`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.middlewares=auth@file,security-headers@file"
+
+############################
+# RADARR
+############################
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/radarr/config:/config
+      - ../rr_stack/data/radarr/movies:/movies #optional
+      - ../rr_stack/data/qbittorrent/downloads:/downloads #optional
+    depends_on:
+      traefik:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7878/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.radarr.rule=Host(`radarr.arr.local`)"
+      - "traefik.http.routers.radarr.entrypoints=websecure"
+      - "traefik.http.routers.radarr.tls=true"
+      - "traefik.http.routers.radarr.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.radarr.loadbalancer.server.port=7878"
+      - "traefik.docker.network=arr_network"
+    
+############################
+# SONARR
+############################
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/sonarr/config:/config
+      - ../rr_stack/data/sonarr/tvseries:/tv #optional
+      - ../rr_stack/data/qbittorrent/downloads:/downloads #optional
+    depends_on:
+      traefik:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy  
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8989/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.sonarr.rule=Host(`sonarr.arr.local`)"
+      - "traefik.http.routers.sonarr.entrypoints=websecure"
+      - "traefik.http.routers.sonarr.tls=true"
+      - "traefik.http.routers.sonarr.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.sonarr.loadbalancer.server.port=8989"
+      - "traefik.docker.network=arr_network"
+    
+############################
+# PROWLARR
+############################
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/prowlarr/config:/config
+    depends_on:
+      traefik:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9696/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prowlarr.rule=Host(`prowlarr.arr.local`)"
+      - "traefik.http.routers.prowlarr.entrypoints=websecure"
+      - "traefik.http.routers.prowlarr.tls=true"
+      - "traefik.http.routers.prowlarr.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.prowlarr.loadbalancer.server.port=9696"
+      - "traefik.docker.network=arr_network"
+
+############################
+# BAZARR
+############################
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/bazarr/config:/config
+      - ../rr_stack/data/radarr/movies:/movies #optional
+      - ../rr_stack/data/sonarr/tvseries:/tv #optional
+    depends_on:
+      traefik:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6767/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bazarr.rule=Host(`bazarr.arr.local`)"
+      - "traefik.http.routers.bazarr.entrypoints=websecure"
+      - "traefik.http.routers.bazarr.tls=true"
+      - "traefik.http.routers.bazarr.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.bazarr.loadbalancer.server.port=6767"
+      - "traefik.docker.network=arr_network"
+    
+############################
+# LIDARR
+############################
+
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/lidarr/config:/config
+      - ../rr_stack/data/lidarr/music:/music #optional
+      - ../rr_stack/data/qbittorrent/downloads:/downloads #optional
+    depends_on:
+      traefik:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8686/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lidarr.rule=Host(`lidarr.arr.local`)"
+      - "traefik.http.routers.lidarr.entrypoints=websecure"
+      - "traefik.http.routers.lidarr.tls=true"
+      - "traefik.http.routers.lidarr.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.lidarr.loadbalancer.server.port=8686"
+      - "traefik.docker.network=arr_network"
+    
+############################
+# QBITTORRENT		
+############################
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+      - WEBUI_PORT=${QBITTORRENT_WEBUI_PORT:-8085}
+      - TORRENTING_PORT=${QBITTORRENT_TORRENTING_PORT:-6881}
+    volumes:
+      - ../rr_stack/data/qbittorrent/config:/config
+      - ../rr_stack/data/qbittorrent/downloads:/downloads #optional
+    depends_on:
+      traefik:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.qbittorrent.rule=Host(`qbittorrent.arr.local`)"
+      - "traefik.http.routers.qbittorrent.entrypoints=websecure"
+      - "traefik.http.routers.qbittorrent.tls=true"
+      - "traefik.http.routers.qbittorrent.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.qbittorrent.loadbalancer.server.port=8085"
+      - "traefik.docker.network=arr_network"
+    
+############################
+# JELLYFIN	
+############################
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/jellyfin/config:/config
+      - ../rr_stack/data/sonarr/tvseries:/data/tvshows
+      - ../rr_stack/data/radarr/movies:/data/movies
+    ports:
+      - 8920:8920 #optional - DLNA
+      - 7359:7359/udp #optional - Service discovery
+      - 1900:1900/udp #optional - DLNA discovery
+    depends_on:
+      traefik:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jellyfin.rule=Host(`jellyfin.arr.local`)"
+      - "traefik.http.routers.jellyfin.entrypoints=websecure"
+      - "traefik.http.routers.jellyfin.tls=true"
+      - "traefik.http.routers.jellyfin.middlewares=security-headers@file"
+      - "traefik.http.services.jellyfin.loadbalancer.server.port=8096"
+      - "traefik.docker.network=arr_network"
+    
+############################
+# GLUETUN
+############################
+
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    networks:
+      - arr_network
+    ports:
+      - 6881:6881 #qbittorrent
+      - 6881:6881/udp #qbittorrent
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ../rr_stack/data/gluetun:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER:-nordvpn}
+      - VPN_TYPE=${VPN_TYPE:-openvpn}
+      - OPENVPN_USER=${OPENVPN_USER}
+      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
+      - SERVER_COUNTRIES=${SERVER_COUNTRIES:-Finland,Switzerland,Albania}
+      - FIREWALL=on
+      - FIREWALL_VPN_INPUT_PORTS=${QBITTORRENT_TORRENTING_PORT:-6881}
+      - FIREWALL_OUTBOUND_SUBNETS=192.168.0.0/16,172.16.0.0/12,10.0.0.0/8
+      - DOT=off
+      - HTTP_CONTROL_SERVER_ADDRESS=${HTTP_CONTROL_SERVER_ADDRESS:-:10001}
+      - HTTP_CONTROL_SERVER_DISABLE_AUTH=${HTTP_CONTROL_SERVER_DISABLE_AUTH:-true}
+      - HEALTH_VPN_DURATION_INITIAL=${HEALTH_VPN_DURATION_INITIAL:-60s}
+      - HEALTH_VPN_DURATION_ADDITION=${HEALTH_VPN_DURATION_ADDITION:-5s}
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "ping -c 1 1.1.1.1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gluetun.rule=Host(`gluetun.arr.local`)"
+      - "traefik.http.routers.gluetun.entrypoints=websecure"
+      - "traefik.http.routers.gluetun.tls=true"
+      - "traefik.http.routers.gluetun.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.gluetun.loadbalancer.server.port=10001"
+      - "traefik.docker.network=arr_network"
+
+############################
+# AUTHELIA - Authentication
+############################
+
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    networks:
+      - arr_network
+    volumes:
+      - ./authelia:/config
+    environment:
+      - TZ=${TZ:-Europe/Istanbul}
+      - AUTHELIA_JWT_SECRET=${AUTHELIA_JWT_SECRET}
+      - AUTHELIA_SESSION_SECRET=${AUTHELIA_SESSION_SECRET}
+      - AUTHELIA_STORAGE_ENCRYPTION_KEY=${AUTHELIA_STORAGE_ENCRYPTION_KEY}
+    depends_on:
+      traefik:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9091/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.authelia.rule=Host(`auth.arr.local`)"
+      - "traefik.http.routers.authelia.entrypoints=websecure"
+      - "traefik.http.routers.authelia.tls=true"
+      - "traefik.http.services.authelia.loadbalancer.server.port=9091"
+      - "traefik.docker.network=arr_network"
+      
+############################
