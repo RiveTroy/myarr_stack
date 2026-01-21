@@ -102,6 +102,7 @@ docker-compose up -d
 | qBittorrent | https://qbittorrent.arr.local | ✅ | 8080 |
 | Jellyfin | https://jellyfin.arr.local | ❌ (own auth) | 8096 |
 | Gluetun Health | https://gluetun.arr.local | ✅ | 10001 |
+| FlareSolverr | - | - | 8191 (internal) |
 
 **İlk Erişim Akışı:**
 1. Herhangi bir servise git (örn: https://radarr.arr.local)

@@ -172,6 +172,37 @@ services:
       - "traefik.docker.network=arr_network"
 
 ############################
+# FLARESOLVERR
+############################
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    networks:
+      - arr_network
+    environment:
+      - LOG_LEVEL=${FLARESOLVERR_LOG_LEVEL:-info}
+      - BROWSER_TIMEOUT=120000
+      - CAPTCHA_SOLVER=none
+      - TZ=${TZ:-Europe/Istanbul}
+    depends_on:
+      traefik:
+        condition: service_healthy
+      gluetun:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8191/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    labels:
+      - "traefik.enable=false"  # Internal service - no external access
+
+############################
 # BAZARR
 ############################
 
