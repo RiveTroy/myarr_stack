@@ -19,8 +19,8 @@ services:
     image: adguard/adguardhome:latest
     container_name: adguardhome
     ports:
-      - "5380:53/tcp"    # DNS (custom port for macOS)
-      - "5380:53/udp"    # DNS (ports 53 and 5353 used by macOS)
+      - "53:53/tcp"    # DNS (custom port for macOS)
+      - "53:53/udp"    # DNS (ports 53 and 5353 used by macOS)
       - "3000:3000/tcp"  # Web UI (initial setup)
       - "3001:80/tcp"    # Web UI (after setup - optional)
     volumes:

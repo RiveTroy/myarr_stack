@@ -21,6 +21,9 @@ authelia/users_database.yml
 authelia/db.sqlite3
 authelia/notification.txt
 
+# AdGuardHome - Sensitive configuration
+adguard/adguardhome/
+
 # Data klasörleri (büyük medya dosyaları)
 data/
 downloads/
