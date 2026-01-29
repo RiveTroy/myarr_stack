@@ -74,8 +74,7 @@ services:
       - TZ=${TZ:-Europe/Istanbul}
     volumes:
       - ../rr_stack/data/radarr/config:/config
-      - ../rr_stack/data/radarr/movies:/movies #optional
-      - ../rr_stack/data/qbittorrent/downloads:/downloads #optional
+      - ../rr_stack/data:/data  # TEK BIND MOUNT - Hardlink için kritik!
     depends_on:
       traefik:
         condition: service_healthy
@@ -84,7 +83,7 @@ services:
     restart: always
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7878/ping"]
-      interval: 30s
+      # interval: 30s
       timeout: 10s
       retries: 10
       start_period: 60s
@@ -112,8 +111,7 @@ services:
       - TZ=${TZ:-Europe/Istanbul}
     volumes:
       - ../rr_stack/data/sonarr/config:/config
-      - ../rr_stack/data/sonarr/tvseries:/tv #optional
-      - ../rr_stack/data/qbittorrent/downloads:/downloads #optional
+      - ../rr_stack/data:/data  # TEK BIND MOUNT - Hardlink için kritik!
     depends_on:
       traefik:
         condition: service_healthy
@@ -217,8 +215,7 @@ services:
       - TZ=${TZ:-Europe/Istanbul}
     volumes:
       - ../rr_stack/data/bazarr/config:/config
-      - ../rr_stack/data/radarr/movies:/movies #optional
-      - ../rr_stack/data/sonarr/tvseries:/tv #optional
+      - ../rr_stack/data:/data  # TEK BIND MOUNT
     depends_on:
       traefik:
         condition: service_healthy
@@ -255,8 +252,7 @@ services:
       - TZ=${TZ:-Europe/Istanbul}
     volumes:
       - ../rr_stack/data/lidarr/config:/config
-      - ../rr_stack/data/lidarr/music:/music #optional
-      - ../rr_stack/data/qbittorrent/downloads:/downloads #optional
+      - ../rr_stack/data:/data  # TEK BIND MOUNT
     depends_on:
       traefik:
         condition: service_healthy
@@ -295,7 +291,7 @@ services:
       - TORRENTING_PORT=${QBITTORRENT_TORRENTING_PORT:-6881}
     volumes:
       - ../rr_stack/data/qbittorrent/config:/config
-      - ../rr_stack/data/qbittorrent/downloads:/downloads #optional
+      - ../rr_stack/data:/data  # TEK BIND MOUNT - Hardlink için kritik!
     depends_on:
       traefik:
         condition: service_healthy
@@ -332,12 +328,11 @@ services:
       - TZ=${TZ:-Europe/Istanbul}
     volumes:
       - ../rr_stack/data/jellyfin/config:/config
-      - ../rr_stack/data/sonarr/tvseries:/data/tvshows
-      - ../rr_stack/data/radarr/movies:/data/movies
+      - ../rr_stack/data:/data:ro  # TEK BIND MOUNT (read-only)
     ports:
-      - 8920:8920 #optional - DLNA
-      - 7359:7359/udp #optional - Service discovery
-      - 1900:1900/udp #optional - DLNA discovery
+      - 8920:8920       # DLNA
+      - 7359:7359/udp   # Service discovery
+      - 1900:1900/udp   # DLNA discovery (Plex DLNA disabled)
     depends_on:
       traefik:
         condition: service_healthy
@@ -438,5 +433,284 @@ services:
       - "traefik.http.routers.authelia.tls=true"
       - "traefik.http.services.authelia.loadbalancer.server.port=9091"
       - "traefik.docker.network=arr_network"
-      
+
+############################
+# PLEX MEDIA SERVER
+############################
+
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    profiles:
+      - plex-stack  # Sadece: docker compose --profile plex-stack up -d
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+      - VERSION=docker
+      - PLEX_CLAIM=claim-FN4CPs-1jhLaUdE65CPy
+    volumes:
+      - ../rr_stack/data/plex/config:/config
+      - ../rr_stack/data/plex/transcode:/transcode
+      - ../rr_stack/data:/data:ro  # TEK BIND MOUNT (read-only, Plex sadece okur)
+    ports:
+      - 32400:32400/tcp  # Plex Web UI
+      - 3005:3005/tcp    # Plex Companion
+      - 8324:8324/tcp    # Plex Roku
+      # DLNA disabled - Jellyfin kullanılacak
+      # - 32469:32469/tcp  # Plex DLNA
+      # - 1900:1900/udp    # Plex DLNA
+      - 32410:32410/udp  # GDM Network discovery (lokal TV'ler için)
+      - 32412:32412/udp  # GDM Network discovery
+      - 32413:32413/udp  # GDM Network discovery
+      - 32414:32414/udp  # GDM Network discovery
+    depends_on:
+      traefik:
+        condition: service_healthy
+    restart: "no"  # YEDEK - Otomatik başlamaz (Jellyfin kullanılıyor)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:32400/identity"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.plex.rule=Host(`plex.arr.local`)"
+      - "traefik.http.routers.plex.entrypoints=websecure"
+      - "traefik.http.routers.plex.tls=true"
+      - "traefik.http.routers.plex.middlewares=security-headers@file"  # Authelia YOK - Plex kendi auth'u kullanır
+      - "traefik.http.services.plex.loadbalancer.server.port=32400"
+      - "traefik.docker.network=arr_network"
+
+############################
+# JELLYSEERR - Request Management (Jellyfin-first)
+############################
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/jellyseerr/config:/app/config
+    depends_on:
+      traefik:
+        condition: service_healthy
+      jellyfin:
+        condition: service_healthy
+    restart: always
+    # Healthcheck disabled - curl not available in image
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:5055/api/v1/status"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 10
+    #   start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jellyseerr.rule=Host(`jellyseerr.arr.local`)"
+      - "traefik.http.routers.jellyseerr.entrypoints=websecure"
+      - "traefik.http.routers.jellyseerr.tls=true"
+      - "traefik.http.routers.jellyseerr.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.jellyseerr.loadbalancer.server.port=5055"
+      - "traefik.docker.network=arr_network"
+
+############################
+# OVERSEERR - YEDEK (Plex için)
+# NOT: Jellyfin kullanıldığı için kapalı
+# Manuel başlatmak için: docker start overseerr
+############################
+
+  overseerr:
+    image: lscr.io/linuxserver/overseerr:latest
+    container_name: overseerr
+    profiles:
+      - plex-stack  # Sadece: docker compose --profile plex-stack up -d
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/overseerr/config:/config
+    depends_on:
+      traefik:
+        condition: service_healthy
+      plex:
+        condition: service_healthy
+    restart: "no"  # YEDEK - Otomatik başlamaz
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5055/api/v1/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.overseerr.rule=Host(`overseerr.arr.local`)"
+      - "traefik.http.routers.overseerr.entrypoints=websecure"
+      - "traefik.http.routers.overseerr.tls=true"
+      - "traefik.http.routers.overseerr.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.overseerr.loadbalancer.server.port=5055"
+      - "traefik.docker.network=arr_network"
+
+############################
+# TAUTULLI - Plex Statistics
+############################
+
+  tautulli:
+    image: lscr.io/linuxserver/tautulli:latest
+    container_name: tautulli
+    profiles:
+      - plex-stack  # Sadece: docker compose --profile plex-stack up -d
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/tautulli/config:/config
+    depends_on:
+      traefik:
+        condition: service_healthy
+      plex:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8181/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tautulli.rule=Host(`tautulli.arr.local`)"
+      - "traefik.http.routers.tautulli.entrypoints=websecure"
+      - "traefik.http.routers.tautulli.tls=true"
+      - "traefik.http.routers.tautulli.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.tautulli.loadbalancer.server.port=8181"
+      - "traefik.docker.network=arr_network"
+
+############################
+# READARR - Ebook Management
+# TODO: DEPRECATED - Alternatif çözüm bulunacak
+############################
+
+  # readarr:
+  #   image: ghcr.io/hotio/readarr:latest  # LinuxServer deprecated, hotio GHCR kullan
+  #   container_name: readarr
+  #   networks:
+  #     - arr_network
+  #   environment:
+  #     - PUID=${PUID:-1000}
+  #     - PGID=${PGID:-1000}
+  #     - TZ=${TZ:-Europe/Istanbul}
+  #   volumes:
+  #     - ../rr_stack/data/readarr/config:/config
+  #     - ../rr_stack/data:/data  # TEK BIND MOUNT - Hardlink için kritik!
+  #   depends_on:
+  #     traefik:
+  #       condition: service_healthy
+  #     gluetun:
+  #       condition: service_healthy
+  #   restart: always
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8787/ping"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 10
+  #     start_period: 60s
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.readarr.rule=Host(`readarr.arr.local`)"
+  #     - "traefik.http.routers.readarr.entrypoints=websecure"
+  #     - "traefik.http.routers.readarr.tls=true"
+  #     - "traefik.http.routers.readarr.middlewares=auth@file,security-headers@file"
+  #     - "traefik.http.services.readarr.loadbalancer.server.port=8787"
+  #     - "traefik.docker.network=arr_network"
+
+############################
+# CALIBRE-WEB - Ebook Reader
+# TODO: Readarr olmadan manuel e-kitap yönetimi
+############################
+
+  # calibre-web:
+  #   image: lscr.io/linuxserver/calibre-web:latest
+  #   container_name: calibre-web
+  #   networks:
+  #     - arr_network
+  #   environment:
+  #     - PUID=${PUID:-1000}
+  #     - PGID=${PGID:-1000}
+  #     - TZ=${TZ:-Europe/Istanbul}
+  #     - DOCKER_MODS=linuxserver/mods:universal-calibre
+  #   volumes:
+  #     - ../rr_stack/data/calibre/config:/config
+  #     - ../rr_stack/data/readarr/books:/books  # Readarr'ın organize ettiği kitaplar
+  #   depends_on:
+  #     traefik:
+  #       condition: service_healthy
+  #     readarr:
+  #       condition: service_healthy
+  #   restart: always
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8083"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 10
+  #     start_period: 60s
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.calibre.rule=Host(`calibre.arr.local`)"
+  #     - "traefik.http.routers.calibre.entrypoints=websecure"
+  #     - "traefik.http.routers.calibre.tls=true"
+  #     - "traefik.http.routers.calibre.middlewares=auth@file,security-headers@file"
+  #     - "traefik.http.services.calibre.loadbalancer.server.port=8083"
+  #     - "traefik.docker.network=arr_network"
+
+############################
+# KOMGA - Manga/Comic Reader
+############################
+
+  komga:
+    image: gotson/komga:latest
+    container_name: komga
+    networks:
+      - arr_network
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Istanbul}
+    volumes:
+      - ../rr_stack/data/komga/config:/config
+      - ../rr_stack/data/komga/manga:/data  # Manga/Comic library (MANUEL)
+    depends_on:
+      traefik:
+        condition: service_healthy
+    restart: always
+    # Healthcheck disabled - Komga actuator endpoint requires authentication
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:25600/api/v1/actuator/health"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 10
+    #   start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.komga.rule=Host(`komga.arr.local`)"
+      - "traefik.http.routers.komga.entrypoints=websecure"
+      - "traefik.http.routers.komga.tls=true"
+      - "traefik.http.routers.komga.middlewares=auth@file,security-headers@file"
+      - "traefik.http.services.komga.loadbalancer.server.port=25600"
+      - "traefik.docker.network=arr_network"
+
 ############################
