@@ -26,6 +26,7 @@ services:
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.localhttp.address=:8888"
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
       - "--providers.file.directory=/etc/traefik/dynamic"
@@ -35,6 +36,7 @@ services:
     ports:
       - "80:80"                # HTTP → HTTPS redirect (network accessible)
       - "443:443"              # HTTPS (network accessible)
+      - "8888:8888"            # HTTP local only (Apple TV, Chromecast)
       - "127.0.0.1:8080:8080"  # Dashboard (localhost only)
     volumes:
       - ${DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock:ro
@@ -57,7 +59,7 @@ services:
       - "traefik.http.routers.traefik.entrypoints=websecure"
       - "traefik.http.routers.traefik.tls=true"
       - "traefik.http.routers.traefik.service=api@internal"
-      - "traefik.http.routers.traefik.middlewares=auth@file,security-headers@file"
+      - "traefik.http.routers.traefik.middlewares=local-only@file,auth@file,security-headers@file"
 
 ############################
 # RADARR
@@ -275,43 +277,37 @@ services:
       - "traefik.docker.network=arr_network"
     
 ############################
-# QBITTORRENT		
+# QBITTORRENT (VPN arkasında - Gluetun network namespace)
 ############################
 
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
     container_name: qbittorrent
-    networks:
-      - arr_network
+    network_mode: "service:gluetun"    # Gluetun'un network stack'ini paylaşır
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - TZ=${TZ:-Europe/Istanbul}
-      - WEBUI_PORT=${QBITTORRENT_WEBUI_PORT:-8085}
-      - TORRENTING_PORT=${QBITTORRENT_TORRENTING_PORT:-6881}
+      - WEBUI_PORT=8085
+      - TORRENTING_PORT=6881
     volumes:
       - ../rr_stack/data/qbittorrent/config:/config
       - ../rr_stack/data:/data  # TEK BIND MOUNT - Hardlink için kritik!
     depends_on:
-      traefik:
-        condition: service_healthy
       gluetun:
         condition: service_healthy
     restart: always
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8085"]
+      # WebUI + Gluetun kontrol sunucusu kontrolü
+      # Gluetun restart olursa namespace kırılır → localhost:10001 erişilemez → unhealthy → autoheal restart eder
+      test: ["CMD-SHELL", "curl -sf http://localhost:8085 > /dev/null && curl -sf --max-time 3 http://localhost:10001/v1/openvpn/portforwarded > /dev/null"]
       interval: 30s
       timeout: 10s
-      retries: 10
+      retries: 3
       start_period: 60s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.qbittorrent.rule=Host(`qbittorrent.arr.local`)"
-      - "traefik.http.routers.qbittorrent.entrypoints=websecure"
-      - "traefik.http.routers.qbittorrent.tls=true"
-      - "traefik.http.routers.qbittorrent.middlewares=auth@file,security-headers@file"
-      - "traefik.http.services.qbittorrent.loadbalancer.server.port=8085"
-      - "traefik.docker.network=arr_network"
+    # NO ports - gluetun üzerinden expose edilir
+    # NO networks - gluetun'un namespace'ini kullanır
+    # NO traefik labels - gluetun üzerinde tanımlı
     
 ############################
 # JELLYFIN	
@@ -330,6 +326,7 @@ services:
       - ../rr_stack/data/jellyfin/config:/config
       - ../rr_stack/data:/data:ro  # TEK BIND MOUNT (read-only)
     ports:
+      - 8096:8096       # Web UI (HTTP direct access for TV/devices)
       - 8920:8920       # DLNA
       - 7359:7359/udp   # Service discovery
       - 1900:1900/udp   # DLNA discovery (Plex DLNA disabled)
@@ -361,29 +358,32 @@ services:
     container_name: gluetun
     networks:
       - arr_network
-    ports:
-      - 6881:6881 #qbittorrent
-      - 6881:6881/udp #qbittorrent
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
+    ports:
+      - "6881:6881/tcp"      # qBittorrent torrent port
+      - "6881:6881/udp"      # qBittorrent torrent port UDP
+      # 8085 NOT published - Traefik handles WebUI routing internally
     volumes:
       - ../rr_stack/data/gluetun:/gluetun
     environment:
-      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER:-nordvpn}
+      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER:-privatevpn}
       - VPN_TYPE=${VPN_TYPE:-openvpn}
       - OPENVPN_USER=${OPENVPN_USER}
       - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
       - SERVER_COUNTRIES=${SERVER_COUNTRIES:-Finland,Switzerland,Albania}
+      - VPN_PORT_FORWARDING=on
+      - VPN_PORT_FORWARDING_UP_COMMAND=/bin/sh -c 'for i in $(seq 1 10); do wget -q -O- --post-data="json={\"listen_port\":{{PORTS}}}" "http://localhost:8085/api/v2/app/setPreferences" && break; sleep 10; done'
       - FIREWALL=on
-      - FIREWALL_VPN_INPUT_PORTS=${QBITTORRENT_TORRENTING_PORT:-6881}
+      - FIREWALL_VPN_INPUT_PORTS=6881
       - FIREWALL_OUTBOUND_SUBNETS=192.168.0.0/16,172.16.0.0/12,10.0.0.0/8
       - DOT=off
-      - HTTP_CONTROL_SERVER_ADDRESS=${HTTP_CONTROL_SERVER_ADDRESS:-:10001}
-      - HTTP_CONTROL_SERVER_DISABLE_AUTH=${HTTP_CONTROL_SERVER_DISABLE_AUTH:-true}
-      - HEALTH_VPN_DURATION_INITIAL=${HEALTH_VPN_DURATION_INITIAL:-60s}
-      - HEALTH_VPN_DURATION_ADDITION=${HEALTH_VPN_DURATION_ADDITION:-5s}
+      - HTTP_CONTROL_SERVER_ADDRESS=:10001
+      - HTTP_CONTROL_SERVER_DISABLE_AUTH=true
+      - HEALTH_VPN_DURATION_INITIAL=60s
+      - HEALTH_VPN_DURATION_ADDITION=5s
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "ping -c 1 1.1.1.1 || exit 1"]
@@ -393,12 +393,24 @@ services:
       start_period: 60s
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=config_arr_network"
+      # Gluetun Control Panel (LOCAL ONLY)
       - "traefik.http.routers.gluetun.rule=Host(`gluetun.arr.local`)"
       - "traefik.http.routers.gluetun.entrypoints=websecure"
       - "traefik.http.routers.gluetun.tls=true"
-      - "traefik.http.routers.gluetun.middlewares=auth@file,security-headers@file"
+      - "traefik.http.routers.gluetun.middlewares=local-only@file,auth@file,security-headers@file"
       - "traefik.http.services.gluetun.loadbalancer.server.port=10001"
-      - "traefik.docker.network=arr_network"
+      # ── qBittorrent WebUI (Traefik üzerinden) ──
+      - "traefik.http.routers.gluetun-qbit.rule=Host(`qbittorrent.arr.local`) || Host(`qbit.arr.local`)"
+      - "traefik.http.routers.gluetun-qbit.entrypoints=websecure"
+      - "traefik.http.routers.gluetun-qbit.tls=true"
+      - "traefik.http.routers.gluetun-qbit.service=gluetun-qbit-svc"
+      - "traefik.http.routers.gluetun-qbit.middlewares=auth@file,security-headers@file,qbit-headers"
+      - "traefik.http.services.gluetun-qbit-svc.loadbalancer.server.port=8085"
+      # qBittorrent reverse proxy headers
+      - "traefik.http.middlewares.qbit-headers.headers.customrequestheaders.X-Frame-Options=SAMEORIGIN"
+      - "traefik.http.middlewares.qbit-headers.headers.customrequestheaders.Referer="
+      - "traefik.http.middlewares.qbit-headers.headers.customrequestheaders.Origin="
 
 ############################
 # AUTHELIA - Authentication

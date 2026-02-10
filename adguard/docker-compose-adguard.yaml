@@ -1,14 +1,18 @@
 ########################################################################
-#     _    ____   ____ _   _    _    ____  ____    _   _  ___  __  __ _____ 
+#     _    ____   ____ _   _    _    ____  ____    _   _  ___  __  __ _____
 #    / \  |  _ \ / ___| | | |  / \  |  _ \|  _ \  | | | |/ _ \|  \/  | ____|
-#   / _ \ | | | | |  _| | | | / _ \ | |_) | | | | | |_| | | | | |\/| |  _|  
-#  / ___ \| |_| | |_| | |_| |/ ___ \|  _ <| |_| | |  _  | |_| | |  | | |___ 
+#   / _ \ | | | | |  _| | | | / _ \ | |_) | | | | | |_| | | | | |\/| |  _|
+#  / ___ \| |_| | |_| | |_| |/ ___ \|  _ <| |_| | |  _  | |_| | |  | | |___
 # /_/   \_\____/ \____|\___//_/   \_\_| \_\____/  |_| |_|\___/|_|  |_|_____|
 #
 # DNS Server + Ad Blocker for entire home network
 # Provides DNS resolution for *.arr.local domains
 ########################################################################
 ---
+networks:
+  config_arr_network:
+    external: true
+
 services:
 
 ############################
@@ -18,11 +22,13 @@ services:
   adguardhome:
     image: adguard/adguardhome:latest
     container_name: adguardhome
+    networks:
+      - config_arr_network
     ports:
-      - "53:53/tcp"    # DNS (custom port for macOS)
-      - "53:53/udp"    # DNS (ports 53 and 5353 used by macOS)
-      - "3000:3000/tcp"  # Web UI (initial setup)
-      - "3001:80/tcp"    # Web UI (after setup - optional)
+      - "53:53/tcp"      # DNS
+      - "53:53/udp"      # DNS
+      - "3000:3000/tcp"  # Web UI (initial setup only)
+      # Port 80/443 handled by Traefik
     volumes:
       - ./adguardhome/work:/opt/adguardhome/work
       - ./adguardhome/conf:/opt/adguardhome/conf
@@ -35,9 +41,17 @@ services:
       timeout: 10s
       retries: 10
       start_period: 30s
+    labels:
+      # Traefik (LOCAL ONLY)
+      - "traefik.enable=true"
+      - "traefik.http.routers.adguard.rule=Host(`adguard.arr.local`)"
+      - "traefik.http.routers.adguard.entrypoints=websecure"
+      - "traefik.http.routers.adguard.tls=true"
+      - "traefik.http.routers.adguard.middlewares=local-only@file,auth@file"
+      - "traefik.http.services.adguard.loadbalancer.server.port=80"
+      - "traefik.docker.network=config_arr_network"
 
 # Port Info:
-# - 5380/tcp, 5380/udp: DNS queries on macOS (ports 53 and 5353 used by system)
-#   Note: On Linux server, change to "53:53" for standard DNS port
-# - 3000/tcp: Web UI (initial setup)
-# - 3001/tcp: Web UI mapped to container port 80 (after setup - optional)
+# - 53/tcp, 53/udp: DNS queries
+# - 3000/tcp: Web UI (initial setup only)
+# - HTTPS via Traefik: adguard.arr.local (Authelia protected)
