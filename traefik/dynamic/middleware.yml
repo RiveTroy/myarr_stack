@@ -35,11 +35,30 @@ http:
           - Remote-Name
           - Remote-Email
 
-    # IP Whitelist (optional - local network only)
+    # IP Whitelist (local network only - NO Tailscale)
     local-only:
       ipWhiteList:
         sourceRange:
           - "127.0.0.1/32"
           - "192.168.0.0/16"
-          - "172.16.0.0/12"
+          - "172.0.0.0/8"      # Tüm 172.x.x.x (senin LAN dahil)
           - "10.0.0.0/8"
+          # NOT: 100.64.0.0/10 (Tailscale) dahil DEĞİL!
+
+    # Redirect arr.local → ts.net (valid SSL)
+    redirect-to-tailscale:
+      redirectRegex:
+        regex: "^https://([a-z0-9-]+)\\.arr\\.local(.*)"
+        replacement: "https://${1}.your-hostname.ts.net${2}"
+        permanent: false
+
+    # Authelia for ts.net domain
+    auth-tsnet:
+      forwardAuth:
+        address: http://authelia:9091/api/verify?rd=https://auth.your-hostname.ts.net
+        trustForwardHeader: true
+        authResponseHeaders:
+          - Remote-User
+          - Remote-Groups
+          - Remote-Name
+          - Remote-Email

@@ -1,7 +1,11 @@
 tls:
   certificates:
+    # Self-signed for arr.local (local access)
     - certFile: /certs/arr.local.crt
       keyFile: /certs/arr.local.key
+    # Tailscale Let's Encrypt cert (remote access)
+    - certFile: /certs/your-hostname.ts.net.crt
+      keyFile: /certs/your-hostname.ts.net.key
 
   options:
     default:
@@ -10,4 +14,4 @@ tls:
         - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
         - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
         - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
-      sniStrict: true
+      sniStrict: false  # Allow both domains
